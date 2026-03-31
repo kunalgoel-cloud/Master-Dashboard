@@ -1,36 +1,45 @@
-import streamlit as st
-import psycopg2
-from psycopg2.extras import RealDictCursor
+# --- CUSTOM CSS FOR STYLING ---
+st.markdown("""
+    <style>
+    /* Card Container Styling */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
+        border-color: #ff4b4b !important;
+    }
+    /* Metric Styling */
+    [data-testid="stMetricValue"] {
+        font-size: 1.8rem;
+        color: #ff4b4b;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- DATABASE CONNECTION ---
-def init_connection():
-    return psycopg2.connect(st.secrets["postgres"]["url"])
-
-conn = init_connection()
-
-def run_query(query, params=None, commit=False):
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        try:
-            cur.execute(query, params)
-            if commit:
-                conn.commit()
-                return None
-            return cur.fetchall()
-        except Exception as e:
-            conn.rollback()
-            st.error(f"Database Error: {e}")
-            return []
-
-# --- APP UI ---
-st.set_page_config(page_title="Master Dashboard Hub", layout="wide")
-st.title("🚀 Enterprise Dashboard Portal")
-
-tabs = st.tabs(["🏠 Hub", "⚙️ Configuration"])
-
-# --- TAB 1: THE HUB ---
+# --- TAB 1: THE HUB (UI OVERHAUL) ---
 with tabs[0]:
+    # 1. HERO SECTION
+    st.markdown("""
+        <div style="background-color: #f0f2f6; padding: 2rem; border-radius: 15px; margin-bottom: 2rem;">
+            <h1 style="margin: 0;">Main Dashboard Hub 🏢</h1>
+            <p style="color: #555; font-size: 1.1rem;">Centralized access to all enterprise analytics tools.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 2. QUICK METRICS
     categories = run_query("SELECT * FROM categories ORDER BY name ASC")
+    total_apps = run_query("SELECT COUNT(*) as count FROM dashboards WHERE is_active = True")[0]['count']
     
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Departments", len(categories))
+    m2.metric("Active Dashboards", total_apps)
+    m3.metric("System Status", "Healthy 🟢")
+    
+    st.divider()
+
+    # 3. DYNAMIC CATEGORY GRID
     if not categories:
         st.info("No departments defined yet. Go to Configuration to add some!")
     
@@ -40,66 +49,31 @@ with tabs[0]:
             (cat['id'],)
         )
         
-        # Only show the category if it has apps, or keep it visible if you prefer
-        with st.expander(f"## {cat['name']} Dashboards", expanded=True):
-            if not apps:
-                st.caption("No dashboards in this department.")
-            else:
-                cols = st.columns(3)
-                for idx, app in enumerate(apps):
-                    with cols[idx % 3]:
-                        st.container(border=True).markdown(f"**{app['title']}**\n\n{app['description']}")
-                        st.link_button("Open App", app['url'], use_container_width=True)
-
-# --- TAB 2: CONFIGURATION ---
-with tabs[1]:
-    col1, col2 = st.columns(2)
-
-    # 1. DEPARTMENT MANAGEMENT
-    with col1:
-        st.subheader("🏢 Define Departments")
-        with st.form("add_dept_form", clear_on_submit=True):
-            new_dept = st.text_input("New Department Name (e.g., Marketing)")
-            if st.form_submit_button("Add Department"):
-                if new_dept:
-                    run_query("INSERT INTO categories (name) VALUES (%s) ON CONFLICT DO NOTHING", (new_dept,), commit=True)
-                    st.success(f"Department '{new_dept}' added!")
-                    st.rerun()
-
-        # List existing departments
-        st.write("Current Departments:")
-        for c in categories:
-            st.text(f"• {c['name']}")
-
-    # 2. DASHBOARD MANAGEMENT
-    with col2:
-        st.subheader("🔗 Add Dashboard Link")
-        with st.form("add_app_form", clear_on_submit=True):
-            app_name = st.text_input("App Name")
-            app_url = st.text_input("URL")
-            app_desc = st.text_area("Description")
-            
-            cat_map = {c['name']: c['id'] for c in categories}
-            app_dept = st.selectbox("Assign to Department", options=list(cat_map.keys()))
-            
-            if st.form_submit_button("Save Dashboard"):
-                if app_name and app_url:
-                    run_query(
-                        "INSERT INTO dashboards (category_id, title, url, description) VALUES (%s, %s, %s, %s)",
-                        (cat_map[app_dept], app_name, app_url, app_desc),
-                        commit=True
-                    )
-                    st.success(f"Linked {app_name} to {app_dept}!")
-                    st.rerun()
-
-    st.divider()
-    
-    # 3. EDIT/DELETE VIEW
-    st.subheader("📋 Master List")
-    all_apps = run_query("""
-        SELECT d.id, d.title, c.name as department, d.url 
-        FROM dashboards d 
-        JOIN categories c ON d.category_id = c.id
-    """)
-    if all_apps:
-        st.dataframe(all_apps, use_container_width=True)
+        # Heading for the Department
+        st.subheader(f"📂 {cat['name']}")
+        
+        if not apps:
+            st.caption("No dashboards in this department yet.")
+        else:
+            # Create rows of 3
+            cols = st.columns(3)
+            for idx, app in enumerate(apps):
+                with cols[idx % 3]:
+                    # The Card Content
+                    with st.container(border=True):
+                        st.markdown(f"### {app['title']}")
+                        
+                        # Add a "Tag" for the department
+                        st.markdown(f"**{cat['name']}**", help="Department")
+                        
+                        # Description with fixed height for alignment
+                        st.write(app['description'] if app['description'] else "No description provided.")
+                        
+                        # Big primary button for the URL
+                        st.link_button(
+                            "Launch Dashboard 🚀", 
+                            app['url'], 
+                            use_container_width=True,
+                            type="primary"
+                        )
+        st.markdown("<br>", unsafe_allow_html=True) # Spacer between departments
